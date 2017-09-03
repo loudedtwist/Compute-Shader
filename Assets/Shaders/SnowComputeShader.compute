@@ -1,0 +1,84 @@
+﻿#pragma kernel CSMain
+
+#define thread_group_size_x 10
+#define thread_group_size_y 10
+#define thread_group_size_z 10
+
+#define group_size_x 8
+#define group_size_y 8
+#define group_size_z 8
+
+struct Pos{
+	float3 pos;
+	float3 rot;
+}; 
+struct AccOffset {
+	float2 direction;
+};
+
+
+float speed; 
+int wobble = 0;
+float3 wind;
+float rotationSpeed=1;
+float rotationAmount=0.3;
+float4 escapeObj;
+float initFlakeCoordY; 
+float timeOffset = 0;
+float snowGrowProgression;
+ 
+int bottomArrayLength;
+RWStructuredBuffer<Pos> bottomArrayBuffer;
+RWStructuredBuffer<Pos> vertPos;   
+RWStructuredBuffer<AccOffset> acceleration;
+
+[numthreads(thread_group_size_x,thread_group_size_y,thread_group_size_z)]
+void CSMain (uint3 grpID : SV_GroupID, uint3 id : SV_DispatchThreadID, uint3 grpTID : SV_GroupThreadID, uint grpIdx : SV_GroupIndex)
+{ 
+	int idx = id.x + (id.y * thread_group_size_x * group_size_x) + (id.z * thread_group_size_x * group_size_y * thread_group_size_y * group_size_z);
+	float3 oldPos = vertPos[idx].pos; 
+	float3 pos = float3(oldPos.x, oldPos.y , oldPos.z); 
+
+	// GRAVITY
+	pos.y -= acceleration[idx].direction.x * speed;
+
+	//ROTATION 
+	//vertPos[idx].rot.xz += float2(0.01 ,0 ) ;
+	//if(vertPos[idx].rot.y > 1) vertPos[idx].rot.y *= -1.0f;
+	vertPos[idx].rot.z +=  cos(timeOffset * 200 * rotationSpeed) * rotationAmount /*random ->*/ * id.z * 0.01 * grpID.x * 0.1 * grpID.z * 0.1;
+
+	//WIND
+	wind.y = 0; // Don't want the weather going up 
+	pos += (wind * speed );
+ 
+	//SNOW LANDSCAPE GROWS IF FLAKE HITS THE GROUND
+	if(pos.y < 0 && pos.y > -0.1f) {   
+		[loop]
+		for(int i = 0; i < bottomArrayLength ; i++){
+			if(distance(pos.xz, bottomArrayBuffer[i].pos.xz ) < 0.3f){ 
+				bottomArrayBuffer[i].pos.y += 50 * snowGrowProgression;
+				pos.y = initFlakeCoordY; // reset the snowflake to start-y
+				break;
+			}
+		}
+	} 
+
+	//RESET POSTION OF FLAKE TO INIT VALUE IF IT REACHES GROUND
+	if(pos.y < -10){
+		pos.y = initFlakeCoordY;
+	}
+
+	//RESET POSITION OF FLAKE IF IT REACHES THE COLLIDE OBJECT
+	if(distance(pos,escapeObj.xyz) < 0.5f){
+		pos.y = initFlakeCoordY;
+	}
+
+	//SIN/COS WIND EFFECT
+	if (wobble) {
+		pos.x += cos(timeOffset * 100 * acceleration[idx].direction.x ) * 0.01;
+		pos.z += sin(timeOffset * 100 * acceleration[idx].direction.y ) * 0.01;
+	} 
+
+	//ASSIGN VALUE
+	vertPos[idx].pos = pos ;
+}
